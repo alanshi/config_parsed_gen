@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>BTD Network Topology Generator</title>
+    <!-- Tailwind Play CDN for quick styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-slate-50 min-h-screen">
+    <div class="max-w-6xl mx-auto p-6">
+      <h1 class="text-2xl font-semibold mb-4">BTD Network Topology Generator</h1>
+
+      {% if error %}
+        <div class="mb-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded">{{ error }}</div>
+      {% endif %}
+
+      <form action="/generate" method="post" enctype="multipart/form-data" class="grid grid-cols-1 gap-4">
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Network JSON（粘贴或上传）</label>
+            <textarea name="json_text" rows="14" class="w-full p-2 border rounded" placeholder="在此粘贴 network JSON ...">{{ example_json }}</textarea>
+            <div class="mt-2">
+              <label class="block text-sm text-slate-600">或上传文件 (.json)</label>
+              <input type="file" name="json_file" accept=".json" class="mt-1" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">样式配置（可选，JSON）</label>
+            <textarea name="style_text" rows="14" class="w-full p-2 border rounded" placeholder='可覆盖 DEFAULT_STYLE_CONFIG'>{{ default_style }}</textarea>
+            <div class="text-sm text-slate-500 mt-1">修改 nodes / edges / clusters 中的字段来调整样式（fillcolor/fontsize/color 等）。</div>
+          </div>
+        </div>
+
+        <div class="flex gap-2 items-center">
+          <input type="text" name="output_name" placeholder="输出文件名(不带扩展)" class="p-2 border rounded w-64" value="topology" />
+          <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">生成 SVG</button>
+        </div>
+      </form>
+
+      <div class="mt-6">
+        <h2 class="text-xl mb-2">生成结果</h2>
+        {% if svg_url %}
+          <div class="border rounded bg-white p-4">
+            <div class="mb-4">
+              <a href="{{ svg_url }}" class="text-blue-600 hover:underline" target="_blank">在新标签页打开 SVG</a>
+            </div>
+            <div class="overflow-auto">
+              <img src="{{ svg_url }}" alt="topology" class="max-w-full h-auto border" />
+            </div>
+          </div>
+        {% else %}
+          <div class="text-slate-500">生成的 SVG 会在这里显示。</div>
+        {% endif %}
+      </div>
+
+      <footer class="mt-8 text-sm text-slate-500">提示：需要在服务器端安装 <code>diagrams</code> 和系统级 <code>graphviz</code> 才能生成 SVG。</footer>
+    </div>
+  </body>
+</html>
