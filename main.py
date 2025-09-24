@@ -37,13 +37,18 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI()
 
+origins = [
+    "*",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境建议指定前端域名
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
