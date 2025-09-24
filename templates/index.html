@@ -3,59 +3,373 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>BTD Network Topology Generator</title>
-    <!-- Tailwind Play CDN for quick styling -->
+    <title>BTD 网络拓扑生成器</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 自定义 Tailwind 配置 -->
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: "#2563eb",    // 主色调：蓝色（按钮、边框）
+              secondary: "#10b981",  // 辅助色：绿色（下载按钮）
+              danger: "#dc2626",     // 警示色：红色（BGP 相关）
+              neutral: "#6b7280",    // 中性色：灰色（文本提示）
+            },
+            animation: {
+              "fade-in": "fadeIn 0.3s ease-in-out",  // 弹窗淡入动画
+            },
+            keyframes: {
+              fadeIn: {
+                "0%": { opacity: "0", transform: "translate(-50%, -50%) scale(0.95)" },
+                "100%": { opacity: "1", transform: "translate(-50%, -50%) scale(1)" },
+              },
+            },
+          },
+        }
+      }
+    </script>
+    <style type="text/tailwindcss">
+      @layer utilities {
+        .content-auto {
+          content-visibility: auto;
+        }
+        .input-focus {
+          @apply focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none;
+        }
+        .btn-hover {
+          @apply transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-[0.98];
+        }
+        .modal-backdrop {
+          @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-40;
+        }
+        .modal-container {
+          @apply fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl w-[90%] max-w-3xl max-h-[80vh] overflow-auto z-50 animate-fade-in;
+        }
+      }
+    </style>
   </head>
-  <body class="bg-slate-50 min-h-screen">
-    <div class="max-w-6xl mx-auto p-6">
-      <h1 class="text-2xl font-semibold mb-4">BTD Network Topology Generator</h1>
+  <body class="bg-gray-50 min-h-screen flex flex-col">
+    <!-- 头部导航 -->
+    <header class="bg-primary text-white py-5 shadow-lg">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <h1 class="text-2xl font-bold text-center sm:text-left">BTD 网络拓扑生成器</h1>
+        <p class="text-sm mt-1 text-blue-100 text-center sm:text-left">快速生成含 BGP 关系的网络拓扑 SVG</p>
+      </div>
+    </header>
 
-      {% if error %}
-        <div class="mb-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded">{{ error }}</div>
-      {% endif %}
-
-      <form action="/generate" method="post" enctype="multipart/form-data" class="grid grid-cols-1 gap-4">
-        <div class="grid lg:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Network JSON（粘贴或上传）</label>
-            <textarea name="json_text" rows="14" class="w-full p-2 border rounded" placeholder="在此粘贴 network JSON ...">{{ example_json }}</textarea>
-            <div class="mt-2">
-              <label class="block text-sm text-slate-600">或上传文件 (.json)</label>
-              <input type="file" name="json_file" accept=".json" class="mt-1" />
-            </div>
+    <!-- 主内容区 -->
+    <main class="flex-grow max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8" style="width: 1200px;">
+      <!-- 核心配置卡片 -->
+      <div class="bg-white rounded-2xl shadow-md p-6 sm:p-8 space-y-8">
+        <!-- 1. 网络 JSON 配置（核心输入区） -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <label class="block text-base font-semibold text-gray-800">网络设备 JSON 配置</label>
+            <p class="text-xs text-neutral">必填：包含 network_devices 和 network_connections 字段</p>
           </div>
 
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">样式配置（可选，JSON）</label>
-            <textarea name="style_text" rows="14" class="w-full p-2 border rounded" placeholder='可覆盖 DEFAULT_STYLE_CONFIG'>{{ default_style }}</textarea>
-            <div class="text-sm text-slate-500 mt-1">修改 nodes / edges / clusters 中的字段来调整样式（fillcolor/fontsize/color 等）。</div>
+          <!-- JSON 输入框（居中放大） -->
+          <div class="flex justify-center">
+            <textarea
+              id="jsonText"
+              rows="28"
+              class="w-full max-w-4xl p-5 border border-gray-300 rounded-lg text-base font-mono input-focus"
+              placeholder="请输入网络设备 JSON 数据（示例：{&#10;  &quot;network_devices&quot;: [...],&#10;  &quot;network_connections&quot;: [...]&#10;}）"
+            >
+{
+  "network_devices": [
+    {
+      "hostname": "C1-GSR12016",
+      "interfaces": [
+        {"name": "Loopback0", "ip_address": "222.7.0.1"},
+        {"name": "TenGigabitEthernet0/0", "description": "TO-S1-7609", "ip_address": "222.7.0.141", "mtu": 1508, "pim_sparse_mode": true}
+      ],
+      "bgp_neighbors": [
+        {"neighbor_ip": "222.7.0.2", "remote_as": 2516},
+        {"neighbor_ip": "222.7.0.225", "remote_as": 4713}
+      ]
+    },
+    {
+      "hostname": "C2-GSR12016",
+      "interfaces": [
+        {"name": "Loopback0", "ip_address": "222.7.0.2"},
+        {"name": "GigabitEthernet2/0", "description": "TO-C1-GSR12016", "ip_address": "222.7.0.138"}
+      ],
+      "bgp_neighbors": [
+        {"neighbor_ip": "222.7.0.1", "remote_as": 2516},
+        {"neighbor_ip": "222.7.0.229", "remote_as": 4713}
+      ]
+    },
+    {
+      "hostname": "S1-7609",
+      "interfaces": [
+        {"name": "Loopback0", "ip_address": "222.7.0.3"},
+        {"name": "TenGigabitEthernet3/1", "description": "TO-C1-GSR12016", "ip_address": "222.7.0.142", "mtu": 1508, "pim_sparse_mode": true}
+      ],
+      "bgp_neighbors": []
+    }
+  ],
+  "network_connections": [
+    {
+      "source_device": "C1-GSR12016",
+      "source_interface": "TenGigabitEthernet0/0",
+      "destination_device": "S1-7609",
+      "destination_interface": "TenGigabitEthernet3/1"
+    },
+    {
+      "source_device": "C1-GSR12016",
+      "source_interface": "TenGigabitEthernet2/0",
+      "destination_device": "C2-GSR12016",
+      "destination_interface": "GigabitEthernet2/0"
+    }
+  ]
+}
+            </textarea>
           </div>
         </div>
 
-        <div class="flex gap-2 items-center">
-          <input type="text" name="output_name" placeholder="输出文件名(不带扩展)" class="p-2 border rounded w-64" value="topology" />
-          <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">生成 SVG</button>
+        <!-- 2. 样式配置（按钮触发弹窗） -->
+        <div class="space-y-4">
+          <label class="block text-base font-semibold text-gray-800">样式自定义</label>
+          <!-- 样式配置按钮 -->
+          <button
+            id="styleConfigBtn"
+            class="px-6 py-3 bg-gray-100 text-gray-800 rounded-lg border border-gray-300 btn-hover flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+            打开样式配置（可选）
+          </button>
+          <p class="text-xs text-neutral">自定义节点、连线、集群的样式（如颜色、形状、字体）</p>
         </div>
-      </form>
 
-      <div class="mt-6">
-        <h2 class="text-xl mb-2">生成结果</h2>
-        {% if svg_url %}
-          <div class="border rounded bg-white p-4">
-            <div class="mb-4">
-              <a href="{{ svg_url }}" class="text-blue-600 hover:underline" target="_blank">在新标签页打开 SVG</a>
-            </div>
-            <div class="overflow-auto">
-              <img src="{{ svg_url }}" alt="topology" class="max-w-full h-auto border" />
-            </div>
-          </div>
-        {% else %}
-          <div class="text-slate-500">生成的 SVG 会在这里显示。</div>
-        {% endif %}
+        <!-- 3. 操作栏（仅保留生成按钮，简化界面） -->
+        <div class="flex justify-center mt-6">
+          <button
+            id="generateBtn"
+            class="px-10 py-4 bg-primary text-white rounded-lg btn-hover flex items-center gap-2 text-base"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+            生成 SVG 拓扑图（默认文件名：network_topology.svg）
+          </button>
+        </div>
       </div>
 
-      <footer class="mt-8 text-sm text-slate-500">提示：需要在服务器端安装 <code>diagrams</code> 和系统级 <code>graphviz</code> 才能生成 SVG。</footer>
+      <!-- 结果显示区域（默认隐藏） -->
+      <section id="resultSection" class="mt-10 hidden">
+        <div class="bg-white rounded-2xl shadow-md p-6 sm:p-8">
+          <h3 class="text-xl font-semibold text-gray-800 mb-6 text-center">拓扑图生成结果</h3>
+
+          <!-- 操作按钮栏 -->
+          <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <a
+              id="svgLink"
+              href="#"
+              target="_blank"
+              class="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg text-sm btn-hover flex items-center gap-1"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              在新标签页打开
+            </a>
+            <button
+              id="downloadBtn"
+              class="px-4 py-2 bg-secondary text-white rounded-lg text-sm btn-hover flex items-center gap-1"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              下载 SVG 文件（network_topology.svg）
+            </button>
+          </div>
+
+          <!-- SVG 预览区域（自适应缩放） -->
+          <div class="flex justify-center p-4 border border-gray-200 rounded-lg bg-gray-50">
+            <img
+              id="svgImage"
+              src=""
+              alt="BTD 网络拓扑图"
+              class="max-w-full max-h-[70vh] object-contain"
+              loading="lazy"
+            />
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="bg-gray-100 py-4 text-center text-xs text-neutral mt-10">
+      <p>依赖环境：需安装 <code class="bg-white px-1 py-0.5 rounded">diagrams</code> 和 <code class="bg-white px-1 py-0.5 rounded">graphviz</code> 库 </p>
+    </footer>
+
+    <!-- 样式配置弹窗（默认隐藏） -->
+    <div id="styleModal" class="hidden">
+      <!-- 弹窗遮罩层 -->
+      <div class="modal-backdrop" id="modalBackdrop"></div>
+      <!-- 弹窗内容区 -->
+      <div class="modal-container p-6 sm:p-8">
+        <div class="flex justify-between items-center mb-6">
+          <h3 class="text-xl font-semibold text-gray-800">样式配置</h3>
+          <button id="closeModalBtn" class="text-neutral hover:text-danger transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <!-- 样式配置文本框 -->
+        <textarea
+          id="styleText"
+          rows="20"
+          class="w-full p-4 border border-gray-300 rounded-lg text-sm font-mono input-focus mb-6"
+          placeholder="请输入样式配置 JSON（示例：{&#10;  &quot;nodes&quot;: {...},&#10;  &quot;edges&quot;: {...},&#10;  &quot;clusters&quot;: {...}&#10;}）"
+        >
+{
+  "nodes": {
+    "core_router": {"shape": "box", "style": "filled,rounded", "fillcolor": "#1a365d", "fontcolor": "white", "penwidth": "1.2", "width": "0.9", "height": "0.8"},
+    "edge_router": {"shape": "box", "style": "filled,rounded", "fillcolor": "#2c5282", "fontcolor": "white", "penwidth": "1.2", "width": "0.9", "height": "0.8"},
+    "switch": {"shape": "box", "style": "filled,rounded", "fillcolor": "#3182ce", "fontcolor": "white", "penwidth": "1.2", "width": "0.9", "height": "0.8"},
+    "other": {"shape": "ellipse", "style": "filled", "fillcolor": "#718096", "fontcolor": "white", "penwidth": "1.0"}
+  },
+  "edges": {
+    "physical": {"fontsize": "6", "color": "#2d3748", "penwidth": "1.2", "labeldistance": "1.0", "labelloc": "c"},
+    "bgp": {"fontsize": "5", "color": "#e6194b", "penwidth": "1.0", "style": "dashed", "labeldistance": "1.1", "labelloc": "c"}
+  },
+  "clusters": {
+    "core_router": {"fillcolor": "#e6f7ff", "color": "#1890ff", "style": "filled,rounded", "penwidth": "1.5", "margin": "0.5"},
+    "edge_router": {"fillcolor": "#fff2e6", "color": "#fa8c16", "style": "filled,rounded", "penwidth": "1.5", "margin": "0.5"},
+    "switch": {"fillcolor": "#f0f9eb", "color": "#52c41a", "style": "filled,rounded", "penwidth": "1.5", "margin": "0.5"}
+  },
+  "graph": {"splines": "spline", "rankdir": "LR", "ranksep": "3.0", "nodesep": "1.0", "fontsize": "10", "fontname": "Arial"}
+}
+        </textarea>
+
+        <!-- 弹窗操作按钮 -->
+        <div class="flex justify-end gap-3">
+          <button id="cancelStyleBtn" class="px-4 py-2 border border-gray-300 rounded-lg text-sm btn-hover">取消</button>
+          <button id="saveStyleBtn" class="px-4 py-2 bg-primary text-white rounded-lg text-sm btn-hover">保存配置</button>
+        </div>
+      </div>
     </div>
+
+    <!-- 交互逻辑脚本（移除上传和文件名相关代码） -->
+    <script>
+      // DOM 元素获取（仅保留核心元素）
+      const generateBtn = document.getElementById("generateBtn");
+      const resultSection = document.getElementById("resultSection");
+      const svgImage = document.getElementById("svgImage");
+      const svgLink = document.getElementById("svgLink");
+      const downloadBtn = document.getElementById("downloadBtn");
+      const jsonText = document.getElementById("jsonText");
+      const styleText = document.getElementById("styleText");
+      const styleModal = document.getElementById("styleModal");
+      const styleConfigBtn = document.getElementById("styleConfigBtn");
+      const closeModalBtn = document.getElementById("closeModalBtn");
+      const cancelStyleBtn = document.getElementById("cancelStyleBtn");
+      const saveStyleBtn = document.getElementById("saveStyleBtn");
+      const modalBackdrop = document.getElementById("modalBackdrop");
+
+      // 样式弹窗状态管理
+      let styleConfig = styleText.value; // 存储当前样式配置
+
+      // 打开样式弹窗
+      styleConfigBtn.addEventListener("click", () => {
+        styleText.value = styleConfig; // 恢复上次保存的配置
+        styleModal.classList.remove("hidden");
+        document.body.style.overflow = "hidden"; // 禁止页面滚动
+      });
+
+      // 关闭样式弹窗（多种触发方式）
+      const closeModal = () => {
+        styleModal.classList.add("hidden");
+        document.body.style.overflow = "auto"; // 恢复页面滚动
+      };
+      closeModalBtn.addEventListener("click", closeModal);
+      cancelStyleBtn.addEventListener("click", closeModal);
+      modalBackdrop.addEventListener("click", closeModal);
+
+      // 保存样式配置
+      saveStyleBtn.addEventListener("click", () => {
+        try {
+          // 简单 JSON 格式校验
+          JSON.parse(styleText.value);
+          styleConfig = styleText.value;
+          closeModal();
+          alert("样式配置保存成功！");
+        } catch (err) {
+          alert("样式配置格式错误（JSON 无效）：" + err.message);
+        }
+      });
+
+      // 生成 SVG 逻辑（简化：固定输出文件名）
+      generateBtn.addEventListener("click", async () => {
+        // 基础校验：仅检查 JSON 输入
+        if (!jsonText.value.trim()) {
+          alert("请输入有效的网络设备 JSON 数据！");
+          jsonText.focus();
+          return;
+        }
+
+        // 构建表单数据（固定输出文件名为 network_topology）
+        const formData = new FormData();
+        try {
+          // 校验 JSON 格式
+          JSON.parse(jsonText.value);
+          formData.append("json_text", jsonText.value);
+        } catch (err) {
+          alert("网络 JSON 格式错误：" + err.message);
+          return;
+        }
+        // 加入样式配置（若有）
+        if (styleConfig.trim()) {
+          formData.append("style_text", styleConfig);
+        }
+        const defaultFileName = "network_topology"; // 固定默认文件名
+        formData.append("output_name", defaultFileName);
+
+        // 发送请求生成 SVG
+        try {
+          generateBtn.disabled = true;
+          generateBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> 生成中...';
+
+          const res = await fetch("https://btd-api.v50ai.com/generate", {
+            method: "POST",
+            body: formData,
+            timeout: 30000 // 30秒超时
+          });
+
+          if (!res.ok) throw new Error(`HTTP 错误：${res.status} ${res.statusText}`);
+          const data = await res.json();
+
+          // 显示结果
+          resultSection.classList.remove("hidden");
+          const svgUrl = "http://btd-api.v50ai.com:8000" + data.svg_url;
+          svgImage.src = svgUrl + "?t=" + new Date().getTime(); // 防止缓存
+          svgLink.href = svgUrl;
+
+          // 下载按钮逻辑（固定文件名）
+          downloadBtn.onclick = () => {
+            const a = document.createElement("a");
+            a.href = svgUrl;
+            a.download = `${defaultFileName}.svg`;
+            a.click();
+          };
+
+          // 滚动到结果区域
+          resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
+
+        } catch (err) {
+          alert("生成失败：" + err.message);
+        } finally {
+          generateBtn.disabled = false;
+          generateBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> 生成 SVG 拓扑图（默认文件名：network_topology.svg）';
+        }
+      });
+    </script>
   </body>
 </html>

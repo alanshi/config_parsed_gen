@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # diagrams imports
 # NOTE: diagrams and graphviz must be installed in the runtime environment
@@ -34,6 +36,14 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 生产环境建议指定前端域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
@@ -283,6 +293,48 @@ def example_json_text():
         "network_connections": []
     }
     return json.dumps(sample, indent=2)
+
+
+@app.post("/generate")
+async def generate(
+    json_text: str = Form(None),
+    json_file: UploadFile = File(None),
+    style_text: str = Form(None),
+    output_name: str = Form("topology")
+):
+    # （保留原有逻辑，生成 SVG，返回路径）
+    try:
+        # 处理 JSON
+        if json_file and json_file.filename:
+            data = await json_file.read()
+            config_text = data.decode("utf-8")
+        elif json_text:
+            config_text = json_text
+        else:
+            raise HTTPException(status_code=400, detail="缺少 JSON 输入")
+
+        config = load_network_config_from_text(config_text)
+        config.setdefault("layout", {"direction": "LR", "rank_sep": 3.0, "node_sep": 1.0})
+        style_config = DEFAULT_STYLE_CONFIG.copy()
+        rel_svg = generate_diagram_from_config(config, style_config, output_name)
+
+        # svg_url = f"/static/{rel_svg}"
+        with open(STATIC_DIR / rel_svg, "r", encoding="utf-8") as f:
+            svg = f.read()
+
+        svg = svg.replace(
+            "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
+            "/icons/"
+        )
+        with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
+            f.write(svg)
+
+
+        return JSONResponse({"svg_url": f"/static/{rel_svg}"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @app.post("/generate", response_class=HTMLResponse)
 async def generate(request: Request,
