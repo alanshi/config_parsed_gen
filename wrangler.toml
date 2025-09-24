@@ -3,10 +3,8 @@ main = "main.py"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["python_workers"]  # 必须启用 Python 支持
 workers_dev = true
+assets = { directory = "static" }
 
 [build]
 command = "pip install -r requirements.txt && cp -r static ."
 upload_format = "service-worker"  # 或 "modules" 视版本而定
-
-[site]
-bucket = "./static"
