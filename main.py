@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import asgi
 
 # diagrams imports
 # NOTE: diagrams and graphviz must be installed in the runtime environment
@@ -35,11 +36,8 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Default(WorkerEntrypoint):
-    async def fetch(self, request):
-        import asgi
-
-        return await asgi.fetch(app, request, self.env)
-
+    async def fetch(self, request, env):
+        return await asgi.fetch(app, request, env)
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
