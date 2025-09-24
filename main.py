@@ -330,6 +330,16 @@ async def generate(request: Request,
         basename = output_name.strip() or "topology"
         rel_svg = generate_diagram_from_config(config, style_config, basename, line_style="ortho")
         svg_url = f"/static/{rel_svg}"
+        with open(STATIC_DIR / rel_svg, "r", encoding="utf-8") as f:
+            svg = f.read()
+
+        svg = svg.replace(
+            "/Users/alan/newWork/lab/venv/lib/python3.13/site-packages/resources/",
+            "/icons/"
+        )
+        with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
+            f.write(svg)
+
     except Exception as e:
         # return template with error
         return templates.TemplateResponse("index.html", {"request": request, "error": str(e), "example_json": config_text, "default_style": json.dumps(style_config, indent=2)})
