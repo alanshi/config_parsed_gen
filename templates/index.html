@@ -348,7 +348,7 @@
 
           // 显示结果
           resultSection.classList.remove("hidden");
-          const svgUrl = "http://btd-api.v50ai.com:8000" + data.svg_url;
+          const svgUrl = "http://btd-api.v50ai.com" + data.svg_url;
           svgImage.src = svgUrl + "?t=" + new Date().getTime(); // 防止缓存
           svgLink.href = svgUrl;
 
