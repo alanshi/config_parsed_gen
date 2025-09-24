@@ -334,7 +334,7 @@ async def generate(request: Request,
             svg = f.read()
 
         svg = svg.replace(
-            "/Users/alan/newWork/lab/venv/lib/python3.13/site-packages/resources/",
+            "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
             "/icons/"
         )
         with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
