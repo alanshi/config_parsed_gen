@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
+from fastapi import Body, FastAPI, Request, Form, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 # NOTE: diagrams and graphviz must be installed in the runtime environment
 from diagrams import Diagram, Cluster, Edge
 from diagrams.generic.network import Switch
+from pydantic import BaseModel
 # we use a generic Router-like node; some diagrams versions expose different providers.
 # Try fallback by importing one of them; prefer diagrams.onprem.network if available.
 try:
@@ -70,6 +71,12 @@ DEFAULT_STYLE_CONFIG = {
         "switch": {"fillcolor": "#f0f9eb", "color": "#52c41a", "style": "filled,rounded"}
     }
 }
+
+# 定义接收 JSON 的 Pydantic 模型
+class GenerateRequest(BaseModel):
+    config: dict        # 网络拓扑 JSON
+    style: dict = None  # 样式 JSON（可选）
+    output_name: str = "network_topology"  # 输出文件名（可选）
 
 # ================ helpers: load and preprocess =======================================
 def load_network_config_from_text(text: str) -> dict:
@@ -300,33 +307,60 @@ def example_json_text():
     return json.dumps(sample, indent=2)
 
 
-@app.post("/generate")
-async def generate(
-    json_text: str = Form(None),
-    json_file: UploadFile = File(None),
-    style_text: str = Form(None),
-    output_name: str = Form("topology")
-):
-    # （保留原有逻辑，生成 SVG，返回路径）
+# @app.post("/generate")
+# async def generate(
+#     json_text: str = Form(None),
+#     json_file: UploadFile = File(None),
+#     style_text: str = Form(None),
+#     output_name: str = Form("topology")
+# ):
+#     # （保留原有逻辑，生成 SVG，返回路径）
+#     try:
+#         # 处理 JSON
+#         if json_file and json_file.filename:
+#             data = await json_file.read()
+#             config_text = data.decode("utf-8")
+#         elif json_text:
+#             config_text = json_text
+#         else:
+#             raise HTTPException(status_code=400, detail="缺少 JSON 输入")
+
+#         config = load_network_config_from_text(config_text)
+#         config.setdefault("layout", {"direction": "LR", "rank_sep": 3.0, "node_sep": 1.0})
+#         style_config = DEFAULT_STYLE_CONFIG.copy()
+#         rel_svg = generate_diagram_from_config(config, style_config, output_name)
+
+#         # svg_url = f"/static/{rel_svg}"
+#         with open(STATIC_DIR / rel_svg, "r", encoding="utf-8") as f:
+#             svg = f.read()
+
+#         svg = svg.replace(
+#             "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
+#             "/icons/"
+#         )
+#         with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
+#             f.write(svg)
+
+
+#         return JSONResponse({"svg_url": f"/static/{rel_svg}"})
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/generate", response_class=JSONResponse)
+async def generate(data: GenerateRequest = Body(...)):
     try:
-        # 处理 JSON
-        if json_file and json_file.filename:
-            data = await json_file.read()
-            config_text = data.decode("utf-8")
-        elif json_text:
-            config_text = json_text
-        else:
-            raise HTTPException(status_code=400, detail="缺少 JSON 输入")
-
+        # 网络配置
+        config_text = json.dumps(data.config)
         config = load_network_config_from_text(config_text)
-        config.setdefault("layout", {"direction": "LR", "rank_sep": 3.0, "node_sep": 1.0})
-        style_config = DEFAULT_STYLE_CONFIG.copy()
-        rel_svg = generate_diagram_from_config(config, style_config, output_name)
+        # 样式配置（如果不传则用默认）
+        style_config = data.style or DEFAULT_STYLE_CONFIG.copy()
 
-        # svg_url = f"/static/{rel_svg}"
+        # 生成 SVG
+        rel_svg = generate_diagram_from_config(config, style_config, data.output_name)
+
+        # 替换 SVG 中的图标路径
         with open(STATIC_DIR / rel_svg, "r", encoding="utf-8") as f:
             svg = f.read()
-
         svg = svg.replace(
             "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
             "/icons/"
@@ -334,74 +368,9 @@ async def generate(
         with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
             f.write(svg)
 
+        return {"svg_url": f"/static/{rel_svg}"}
 
-        return JSONResponse({"svg_url": f"/static/{rel_svg}"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-@app.post("/generate", response_class=HTMLResponse)
-async def generate(request: Request,
-                   json_text: Optional[str] = Form(None),
-                   json_file: Optional[UploadFile] = File(None),
-                   style_text: Optional[str] = Form(None),
-                   output_name: Optional[str] = Form("topology")):
-    """
-    Accept JSON (text or uploaded file) and optional style JSON (text)
-    Generate diagram and show embedded SVG result
-    """
-    # get JSON input
-    if json_file and json_file.filename:
-        data = await json_file.read()
-        try:
-            config_text = data.decode("utf-8")
-        except Exception:
-            raise HTTPException(status_code=400, detail="上传文件需为 UTF-8 编码的 JSON")
-    elif json_text:
-        config_text = json_text
-    else:
-        raise HTTPException(status_code=400, detail="请通过文本或文件上传网络 JSON 配置")
-
-    # load config
-    config = load_network_config_from_text(config_text)
-
-    # merge style config
-    style_config = DEFAULT_STYLE_CONFIG.copy()
-    if style_text:
-        try:
-            ext = json.loads(style_text)
-            # shallow merge: nodes/edges/clusters
-            for k in ["nodes", "edges", "clusters"]:
-                if k in ext and isinstance(ext[k], dict):
-                    style_config.setdefault(k, {}).update(ext[k])
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=400, detail=f"样式 JSON 解析失败：{e}")
-
-    # set layout defaults if not set
-    config.setdefault("layout", {"direction": "LR", "rank_sep": 3.0, "node_sep": 1.0})
-
-    # generate diagram
-    try:
-        # generate unique basename
-        basename = output_name.strip() or "topology"
-        rel_svg = generate_diagram_from_config(config, style_config, basename, line_style="ortho")
-        svg_url = f"/static/{rel_svg}"
-        with open(STATIC_DIR / rel_svg, "r", encoding="utf-8") as f:
-            svg = f.read()
-
-        svg = svg.replace(
-            "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
-            "/icons/"
-        )
-        with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
-            f.write(svg)
-
-    except Exception as e:
-        # return template with error
-        return templates.TemplateResponse("index.html", {"request": request, "error": str(e), "example_json": config_text, "default_style": json.dumps(style_config, indent=2)})
-
-    # return page showing embedded svg
-    return templates.TemplateResponse("index.html", {"request": request, "svg_url": svg_url, "example_json": config_text, "default_style": json.dumps(style_config, indent=2)})
 
 # run via: uvicorn app.main:app --reload

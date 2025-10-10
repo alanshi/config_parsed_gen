@@ -307,68 +307,58 @@
 
       // 生成 SVG 逻辑（简化：固定输出文件名）
       generateBtn.addEventListener("click", async () => {
-        // 基础校验：仅检查 JSON 输入
         if (!jsonText.value.trim()) {
-          alert("请输入有效的网络设备 JSON 数据！");
-          jsonText.focus();
-          return;
+            alert("请输入有效的网络设备 JSON 数据！");
+            jsonText.focus();
+            return;
         }
 
-        // 构建表单数据（固定输出文件名为 network_topology）
-        const formData = new FormData();
-        try {
-          // 校验 JSON 格式
-          JSON.parse(jsonText.value);
-          formData.append("json_text", jsonText.value);
-        } catch (err) {
-          alert("网络 JSON 格式错误：" + err.message);
-          return;
-        }
-        // 加入样式配置（若有）
+        let payload = {
+            config: JSON.parse(jsonText.value),
+            output_name: "network_topology"
+        };
+
         if (styleConfig.trim()) {
-          formData.append("style_text", styleConfig);
+            payload.style = JSON.parse(styleConfig);
         }
-        const defaultFileName = "network_topology"; // 固定默认文件名
-        formData.append("output_name", defaultFileName);
 
-        // 发送请求生成 SVG
         try {
-          generateBtn.disabled = true;
-          generateBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> 生成中...';
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> 生成中...';
 
-          const res = await fetch("https://btd-api.v50ai.com/generate", {
-            method: "POST",
-            body: formData,
-            timeout: 30000 // 30秒超时
-          });
+            const res = await fetch("http://btd-api.v50ai.com/generate", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload),
+                timeout: 30000
+            });
 
-          if (!res.ok) throw new Error(`HTTP 错误：${res.status} ${res.statusText}`);
-          const data = await res.json();
+            if (!res.ok) throw new Error(`HTTP 错误：${res.status} ${res.statusText}`);
+            const data = await res.json();
 
-          // 显示结果
-          resultSection.classList.remove("hidden");
-          const svgUrl = "http://btd-api.v50ai.com" + data.svg_url;
-          svgImage.src = svgUrl + "?t=" + new Date().getTime(); // 防止缓存
-          svgLink.href = svgUrl;
+            resultSection.classList.remove("hidden");
+            const svgUrl = "http://btd-api.v50ai.com" + data.svg_url;
+            svgImage.src = svgUrl + "?t=" + new Date().getTime();
+            svgLink.href = svgUrl;
 
-          // 下载按钮逻辑（固定文件名）
-          downloadBtn.onclick = () => {
-            const a = document.createElement("a");
-            a.href = svgUrl;
-            a.download = `${defaultFileName}.svg`;
-            a.click();
-          };
+            downloadBtn.onclick = () => {
+                const a = document.createElement("a");
+                a.href = svgUrl;
+                a.download = "network_topology.svg";
+                a.click();
+            };
 
-          // 滚动到结果区域
-          resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
+            resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
 
         } catch (err) {
-          alert("生成失败：" + err.message);
+            alert("生成失败：" + err.message);
         } finally {
-          generateBtn.disabled = false;
-          generateBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> 生成 SVG 拓扑图（默认文件名：network_topology.svg）';
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> 生成 SVG 拓扑图（默认文件名：network_topology.svg）';
         }
-      });
+    });
     </script>
   </body>
 </html>
