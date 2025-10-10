@@ -78,6 +78,13 @@ class GenerateRequest(BaseModel):
     style: dict = None  # 样式 JSON（可选）
     output_name: str = "network_topology"  # 输出文件名（可选）
 
+
+class GenerateRequestV2(BaseModel):
+    config: dict        # 新格式 JSON
+    style: dict = None
+    output_name: str = "network_topology_v2"
+
+
 # ================ helpers: load and preprocess =======================================
 def load_network_config_from_text(text: str) -> dict:
     """
@@ -125,6 +132,7 @@ def load_network_config_from_text(text: str) -> dict:
         # collect IPs & find Loopback0
         all_ips = []
         core_ip = "unknown"
+
         for iface in device.get("interfaces", []):
             ip = iface.get("ip_address")
             if ip:
@@ -170,6 +178,7 @@ def create_network_node(device: dict, style_config: dict):
         label_lines.append("BGP: " + s)
     label_lines.append(f"角色: {device['role']}")
     full_label = "\n".join(label_lines)
+
 
     style = style_config["nodes"].get(device["role"], style_config["nodes"]["other"]).copy()
 
@@ -253,7 +262,7 @@ def generate_diagram_from_config(config: dict, style_config: dict, output_basena
                 continue
             e_style = style_config["edges"]["physical"].copy()
             e_style["label"] = f"{si} → {ti}"
-            device_node_map[s] >> Edge(**e_style) >> device_node_map[t]
+            device_node_map[s] >> Edge(**e_style, dir="back") >> device_node_map[t]
 
         # bgp edges (use ip mapping)
         ip_map = config.get("ip_to_hostname", {})
@@ -307,44 +316,65 @@ def example_json_text():
     return json.dumps(sample, indent=2)
 
 
-# @app.post("/generate")
-# async def generate(
-#     json_text: str = Form(None),
-#     json_file: UploadFile = File(None),
-#     style_text: str = Form(None),
-#     output_name: str = Form("topology")
-# ):
-#     # （保留原有逻辑，生成 SVG，返回路径）
-#     try:
-#         # 处理 JSON
-#         if json_file and json_file.filename:
-#             data = await json_file.read()
-#             config_text = data.decode("utf-8")
-#         elif json_text:
-#             config_text = json_text
-#         else:
-#             raise HTTPException(status_code=400, detail="缺少 JSON 输入")
+def convert_new_config_to_old(new_config: dict) -> dict:
+    """
+    将新格式配置转换成旧格式，以便复用原生成逻辑
+    同时保证 BGP AS 之间的连接能被正确解析
+    """
+    network_devices = []
+    network_connections = []
 
-#         config = load_network_config_from_text(config_text)
-#         config.setdefault("layout", {"direction": "LR", "rank_sep": 3.0, "node_sep": 1.0})
-#         style_config = DEFAULT_STYLE_CONFIG.copy()
-#         rel_svg = generate_diagram_from_config(config, style_config, output_name)
+    for dev in new_config.get("devices", []):
+        hostname = dev["name"]
+        loopback = dev.get("loopback", "").split("/")[0]
 
-#         # svg_url = f"/static/{rel_svg}"
-#         with open(STATIC_DIR / rel_svg, "r", encoding="utf-8") as f:
-#             svg = f.read()
+        interfaces = []
+        # 添加 Loopback0 接口（保证 core_ip 能取到）
+        if loopback:
+            interfaces.append({
+                "name": "Loopback0",
+                "ip_address": loopback,
+                "description": "Loopback"
+            })
 
-#         svg = svg.replace(
-#             "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
-#             "/icons/"
-#         )
-#         with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
-#             f.write(svg)
+        # 物理接口
+        for iface in dev.get("interfaces", []):
+            interface_name = iface["interface"]
+            ip_address = iface["ip"].split("/")[0]
+            peer_device, peer_interface = iface["peer"].split(":")
+            interfaces.append({
+                "name": interface_name,
+                "ip_address": ip_address,
+                "description": f"TO-{peer_device}"
+            })
 
+            # 添加物理连接
+            network_connections.append({
+                "source_device": hostname,
+                "source_interface": interface_name,
+                "destination_device": peer_device,
+                "destination_interface": peer_interface
+            })
 
-#         return JSONResponse({"svg_url": f"/static/{rel_svg}"})
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
+        # BGP 邻居
+        bgp_neighbors = []
+        for neigh in dev.get("bgp", {}).get("neighbors", []):
+            bgp_neighbors.append({
+                "neighbor_ip": neigh["ip"].split("/")[0],  # 去掩码
+                "remote_as": neigh["as"]
+            })
+
+        network_devices.append({
+            "hostname": hostname,
+            "interfaces": interfaces,
+            "bgp_neighbors": bgp_neighbors,
+            "as_number": dev.get("bgp", {}).get("as")  # 新增 AS 号字段
+        })
+
+    return {
+        "network_devices": network_devices,
+        "network_connections": network_connections
+    }
 
 @app.post("/generate", response_class=JSONResponse)
 async def generate(data: GenerateRequest = Body(...)):
@@ -372,5 +402,34 @@ async def generate(data: GenerateRequest = Body(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate_v2", response_class=JSONResponse)
+async def generate_v2(data: GenerateRequestV2 = Body(...)):
+    try:
+        # 将新格式转成旧格式
+        old_config = convert_new_config_to_old(data.config)
+        config_text = json.dumps(old_config)
+        config = load_network_config_from_text(config_text)
+
+        style_config = data.style or DEFAULT_STYLE_CONFIG.copy()
+
+        rel_svg = generate_diagram_from_config(config, style_config, data.output_name)
+
+        # 替换 SVG 图标路径
+        with open(STATIC_DIR / rel_svg, "r", encoding="utf-8") as f:
+            svg = f.read()
+        svg = svg.replace(
+            "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
+            "/icons/"
+        )
+        with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
+            f.write(svg)
+
+        return {"svg_url": f"/static/{rel_svg}"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # run via: uvicorn app.main:app --reload
