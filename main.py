@@ -383,11 +383,7 @@ async def generate_topology(req: GenerateRequest = Body(...)):
             output_name=req.output_name
         )
 
-        return {
-            "code": 200,
-            "message": "拓扑生成成功",
-            "data": {"svg_url": svg_url}
-        }
+        return {"svg_url": svg_url}
 
     except HTTPException as e:
         return {"code": e.status_code, "message": e.detail}
