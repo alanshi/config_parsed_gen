@@ -1,47 +1,39 @@
 import os
 import json
 import uuid
-import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Dict, Any, List, Optional
 
-from fastapi import Body, FastAPI, Request, Form, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, Body, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
-# diagrams imports
-# NOTE: diagrams and graphviz must be installed in the runtime environment
+# diagrams 导入（兼容不同版本）
 from diagrams import Diagram, Cluster, Edge
 from diagrams.generic.network import Switch
-from pydantic import BaseModel
-# we use a generic Router-like node; some diagrams versions expose different providers.
-# Try fallback by importing one of them; prefer diagrams.onprem.network if available.
 try:
-    from diagrams.gcp.network import Router as RouterNode
+    from diagrams.onprem.network import Router as RouterNode
 except Exception:
     try:
-        from diagrams.onprem.network import Router as RouterNode
+        from diagrams.gcp.network import Router as RouterNode
     except Exception:
-        # fallback to generic blank provider if Router class not available
         from diagrams.generic.blank import Blank as RouterNode
 
-# app paths
+# ================= 路径配置 =================
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 OUTPUT_DIR = STATIC_DIR / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# ================= 应用初始化 =================
+app = FastAPI(title="BTD 网络拓扑生成器", version="1.0")
 
-app = FastAPI()
-
-origins = [
-    "*",
-]
-
+# 跨域配置
+origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -50,386 +42,365 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 静态文件和模板
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
-# ================= Default style config (can be overridden via form or file) ==============
+# ================= 默认样式配置 =================
 DEFAULT_STYLE_CONFIG = {
     "nodes": {
-        "core_router": {"shape": "box", "style": "filled,rounded", "fillcolor": "#5d391a", "fontcolor": "white", "fontsize": "9", "width": "1.2", "height": "1.1", "fixedsize": "true"},
-        "edge_router": {"shape": "box", "style": "filled,rounded", "fillcolor": "#2c5282", "fontcolor": "white", "fontsize": "9", "width": "1.2", "height": "1.1"},
-        "switch": {"shape": "box", "style": "filled,rounded", "fillcolor": "#3182ce", "fontcolor": "white", "fontsize": "9", "width": "1.2", "height": "1.1"},
-        "other": {"shape": "ellipse", "style": "filled", "fillcolor": "#718096", "fontcolor": "white", "fontsize": "7"}
+        "core_router": {
+            "shape": "box", "style": "filled,rounded",
+            "fillcolor": "#1a365d", "fontcolor": "white",
+            "fontsize": "8", "width": "1.8", "height": "1.5", "fixedsize": "true"
+        },
+        "edge_router": {
+            "shape": "box", "style": "filled,rounded",
+            "fillcolor": "#2c5282", "fontcolor": "white",
+            "fontsize": "8", "width": "1.8", "height": "1.5", "fixedsize": "true"
+        },
+        "agg_switch": {
+            "shape": "box", "style": "filled,rounded",
+            "fillcolor": "#3182ce", "fontcolor": "white",
+            "fontsize": "8", "width": "1.8", "height": "1.5", "fixedsize": "true"
+        },
+        "other": {
+            "shape": "ellipse", "style": "filled",
+            "fillcolor": "#718096", "fontcolor": "white",
+            "fontsize": "8", "width": "1.5", "height": "1.2", "fixedsize": "true"
+        }
     },
     "edges": {
-        "physical": {"fontsize": "9", "color": "#2d3748", "penwidth": "1.2", "labelloc": "c"},
-        "bgp": {"fontsize": "9", "color": "#e6194b", "penwidth": "1.0", "style": "dashed", "labelloc": "c"}
+        "physical": {
+            "fontsize": "7", "color": "#2d3748",
+            "penwidth": "1.2", "labelloc": "c", "splines": "ortho"
+        },
+        "bgp": {
+            "fontsize": "7", "color": "#e6194b",
+            "penwidth": "1.0", "style": "dashed", "labelloc": "c", "dir": "back"
+        }
     },
     "clusters": {
-        "core_router": {"fillcolor": "#e6f7ff", "color": "#1890ff", "style": "filled,rounded"},
-        "edge_router": {"fillcolor": "#fff2e6", "color": "#fa8c16", "style": "filled,rounded"},
-        "switch": {"fillcolor": "#f0f9eb", "color": "#52c41a", "style": "filled,rounded"}
+        "core": {
+            "fillcolor": "#e6f7ff", "color": "#1890ff",
+            "style": "filled,rounded", "penwidth": "1.5", "margin": "0.8"
+        },
+        "edge": {
+            "fillcolor": "#fff2e6", "color": "#fa8c16",
+            "style": "filled,rounded", "penwidth": "1.5", "margin": "0.8"
+        },
+        "agg": {
+            "fillcolor": "#f0f9eb", "color": "#52c41a",
+            "style": "filled,rounded", "penwidth": "1.5", "margin": "0.8"
+        }
+    },
+    "graph": {
+        "rankdir": "LR",
+        "ranksep": "6.0",
+        "nodesep": "2.5",
+        "splines": "spline",
+        "fontsize": "10", "fontname": "Arial", "bgcolor": "white"
     }
 }
 
-# 定义接收 JSON 的 Pydantic 模型
+# ================= Pydantic 模型 =================
 class GenerateRequest(BaseModel):
-    config: dict        # 网络拓扑 JSON
-    style: dict = None  # 样式 JSON（可选）
-    output_name: str = "network_topology"  # 输出文件名（可选）
+    config: dict
+    style: Optional[Dict[str, Any]] = None
+    output_name: str = "btd_network_topology"
 
+# ================= 核心工具函数 =================
+def parse_network_config(config: dict) -> dict:
+    """解析新格式数据，生成绘制所需的结构化数据"""
+    required_keys = ["network_devices", "network_connections"]
+    if not all(key in config for key in required_keys):
+        raise HTTPException(
+            status_code=400,
+            detail="数据必须包含 'network_devices' 和 'network_connections' 字段"
+        )
 
-class GenerateRequestV2(BaseModel):
-    config: dict        # 新格式 JSON
-    style: dict = None
-    output_name: str = "network_topology_v2"
-
-
-# ================ helpers: load and preprocess =======================================
-def load_network_config_from_text(text: str) -> dict:
-    """
-    Parse JSON text into expected internal structure.
-    Raise HTTPException on invalid JSON.
-    """
-    try:
-        config = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"JSON decode error: {e}")
-
-    # Basic validation
-    if "network_devices" not in config or "network_connections" not in config:
-        raise HTTPException(status_code=400, detail="JSON must contain 'network_devices' and 'network_connections'")
-
-    # preprocess: build processed_devices, ip_to_hostname, as_info_map
     processed_devices = []
     ip_to_hostname = {}
-    as_info_map = {}
 
     for device in config["network_devices"]:
         hostname = device.get("hostname")
         if not hostname:
-            continue
+            raise HTTPException(status_code=400, detail=f"设备缺少 hostname 字段")
 
-        # determine role by leading char
         if hostname.startswith("C"):
-            role, color, dtype = "core_router", "#5d391a", "router"
+            role = "core_router"
+            cluster_type = "core"
         elif hostname.startswith("R"):
-            role, color, dtype = "edge_router", "#2c5282", "router"
+            role = "edge_router"
+            cluster_type = "edge"
         elif hostname.startswith("S"):
-            role, color, dtype = "switch", "#3182ce", "switch"
+            role = "agg_switch"
+            cluster_type = "agg"
         else:
-            role, color, dtype = "other", "#718096", "router"
+            role = "other"
+            cluster_type = "other"
 
-        # AS number: prefer an explicit 'as_number' at device level; else try bgp_neighbors' remote_as
-        as_number = device.get("as_number")
-        if as_number is None:
-            bgp_neighbors = device.get("bgp_neighbors", [])
-            if isinstance(bgp_neighbors, list) and bgp_neighbors:
-                # take first neighbor.remote_as if exists
-                first = bgp_neighbors[0]
-                as_number = first.get("remote_as")
+        loopback_info = device.get("loopback_interface", {})
+        core_ip = loopback_info.get("ip_address", "").split("/")[0]
+        if not core_ip:
+            raise HTTPException(status_code=400, detail=f"设备 {hostname} 缺少 loopback_interface.ip_address")
+        ip_to_hostname[core_ip] = hostname
 
-        # collect IPs & find Loopback0
-        all_ips = []
-        core_ip = "unknown"
+        interfaces = device.get("interfaces", [])
+        for iface in interfaces:
+            if_ip = iface.get("ip_address", "").split("/")[0]
+            if if_ip:
+                ip_to_hostname[if_ip] = hostname
 
-        for iface in device.get("interfaces", []):
-            ip = iface.get("ip_address")
-            if ip:
-                all_ips.append(ip)
-                ip_to_hostname[ip] = hostname
-            if iface.get("name") == "Loopback0" and iface.get("ip_address"):
-                core_ip = iface.get("ip_address")
+        bgp_info = device.get("routing_protocols", {}).get("bgp", {})
+        as_number = bgp_info.get("asn")
+        bgp_neighbors = [
+            {
+                "neighbor_ip": neigh.get("neighbor_ip", "").split("/")[0],
+                "remote_as": neigh.get("remote_as"),
+                "description": neigh.get("description", "")
+            }
+            for neigh in bgp_info.get("neighbors", [])
+            if neigh.get("neighbor_ip")
+        ]
 
         processed_devices.append({
             "hostname": hostname,
             "role": role,
-            "color": color,
-            "type": dtype,
+            "cluster_type": cluster_type,
             "core_ip": core_ip,
-            "all_ips": all_ips,
             "as_number": as_number,
-            "interfaces": device.get("interfaces", []),
-            "bgp_neighbors": device.get("bgp_neighbors", [])
-        })
-        as_info_map[hostname] = as_number
-
-    config["processed_devices"] = processed_devices
-    config["ip_to_hostname"] = ip_to_hostname
-    config["as_info_map"] = as_info_map
-    return config
-
-# ================ create node =======================================================
-def is_dark_color(hexcolor: str) -> bool:
-    if not hexcolor or not hexcolor.startswith("#") or len(hexcolor.lstrip("#")) != 6:
-        return False
-    r = int(hexcolor[1:3], 16); g = int(hexcolor[3:5], 16); b = int(hexcolor[5:7], 16)
-    brightness = (r * 299 + g * 587 + b * 114) / 1000
-    return brightness < 128
-
-def create_network_node(device: dict, style_config: dict):
-    """create a diagrams node using style_config (RouterNode or Switch)"""
-    label_lines = [device["hostname"], f"Loopback:{device['core_ip']}"]
-    if device.get("as_number"):
-        label_lines.append(f"AS{device['as_number']}")
-    if device.get("bgp_neighbors"):
-        neighbors = device["bgp_neighbors"][:2]
-        s = ", ".join([f"AS{n.get('remote_as')}:{n.get('neighbor_ip')}" for n in neighbors])
-        label_lines.append("BGP: " + s)
-    label_lines.append(f"角色: {device['role']}")
-    full_label = "\n".join(label_lines)
-
-
-    style = style_config["nodes"].get(device["role"], style_config["nodes"]["other"]).copy()
-
-    # diagrams node constructors accept label and keyword args that map to graphviz attributes
-    if device["type"] == "switch":
-        try:
-            return Switch(full_label, **style)
-        except TypeError:
-            # fallback
-            from diagrams.generic.blank import Blank
-            return Blank(full_label)
-    else:
-        try:
-            return RouterNode(full_label, **style)
-        except TypeError:
-            from diagrams.generic.blank import Blank
-            return Blank(full_label)
-
-# ================ diagram generation ================================================
-def generate_diagram_from_config(config: dict, style_config: dict, output_basename: str, line_style: str = "ortho"):
-    """
-    Generate a diagram SVG using diagrams library.
-    output_basename (no extension) inside static/outputs
-    Returns output SVG relative path for embedding (e.g. "outputs/<name>.svg")
-    """
-    # prepare output paths
-    uid = uuid.uuid4().hex[:8]
-    safe_basename = f"{output_basename}_{uid}"
-    out_path = OUTPUT_DIR / safe_basename
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    layout_dir = config.get("layout", {}).get("direction", "LR").upper()
-    graph_attr = {
-        "fontsize": "10",
-        "fontname": "Arial",
-        "bgcolor": "white",
-        "rankdir": layout_dir,
-        "ranksep": str(config.get("layout", {}).get("rank_sep", 3.0)),
-        "nodesep": str(config.get("layout", {}).get("node_sep", 1.0)),
-        "splines": "spline"
-    }
-
-    # create diagram context
-    filename_noext = str(OUTPUT_DIR / safe_basename)
-    # outformat svg if available
-    try:
-        diag = Diagram("Network Topology", filename=filename_noext, show=False, outformat="svg", graph_attr=graph_attr)
-        ctx = diag
-    except TypeError:
-        diag = Diagram("Network Topology", filename=filename_noext, show=False, graph_attr=graph_attr)
-        ctx = diag
-
-    # build nodes and edges inside context
-    with ctx:
-        device_node_map = {}
-        # clusters
-        with Cluster("核心路由器区", graph_attr=style_config["clusters"]["core_router"]):
-            for dev in config["processed_devices"]:
-                if dev["role"] == "core_router":
-                    node = create_network_node(dev, style_config)
-                    device_node_map[dev["hostname"]] = node
-        with Cluster("边缘路由器区", graph_attr=style_config["clusters"]["edge_router"]):
-            for dev in config["processed_devices"]:
-                if dev["role"] == "edge_router":
-                    node = create_network_node(dev, style_config)
-                    device_node_map[dev["hostname"]] = node
-        with Cluster("汇聚交换机区", graph_attr=style_config["clusters"]["switch"]):
-            for dev in config["processed_devices"]:
-                if dev["role"] == "switch":
-                    node = create_network_node(dev, style_config)
-                    device_node_map[dev["hostname"]] = node
-
-        # physical edges
-        for conn in config["network_connections"]:
-            s = conn.get("source_device"); t = conn.get("destination_device")
-            si = conn.get("source_interface", ""); ti = conn.get("destination_interface", "")
-            if not s or not t:
-                continue
-            if s not in device_node_map or t not in device_node_map:
-                # skip or log
-                continue
-            e_style = style_config["edges"]["physical"].copy()
-            e_style["label"] = f"{si} → {ti}"
-            device_node_map[s] >> Edge(**e_style, dir="back") >> device_node_map[t]
-
-        # bgp edges (use ip mapping)
-        ip_map = config.get("ip_to_hostname", {})
-        drawn = set()
-        for dev in config["processed_devices"]:
-            for neigh in dev.get("bgp_neighbors", []):
-                nip = neigh.get("neighbor_ip")
-                if not nip:
-                    continue
-                target = ip_map.get(nip)
-                if not target:
-                    continue
-                pair = tuple(sorted([dev["hostname"], target]))
-                if pair in drawn:
-                    continue
-                drawn.add(pair)
-                if target not in device_node_map:
-                    continue
-                e_style = style_config["edges"]["bgp"].copy()
-                e_style["label"] = f"BGP\nAS{dev.get('as_number')} → AS{neigh.get('remote_as')}\n{dev.get('core_ip')} → {nip}"
-                device_node_map[dev["hostname"]] >> Edge(**e_style) >> device_node_map[target]
-
-    # ensure svg produced
-    svg_path = Path(filename_noext + ".svg")
-    if not svg_path.exists():
-        # try .gv/.dot fallback to render via graphviz (optional)
-        raise RuntimeError("SVG not produced; check diagrams/graphviz installation and file permissions")
-
-    # copy/move produced svg into outputs directory with stable name
-    final_name = f"{safe_basename}.svg"
-    dest_rel = f"outputs/{final_name}"
-    # already placed in outputs by diagrams (filename pointed there) — ensure file exists
-    return dest_rel
-
-# ===================== fastapi endpoints ============================================
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request):
-    """
-    Serve the simple UI
-    """
-    return templates.TemplateResponse("index.html", {"request": request, "example_json": example_json_text(), "default_style": json.dumps(DEFAULT_STYLE_CONFIG, indent=2)})
-
-def example_json_text():
-    # a short example to prefill the textarea (keeps the big original out of template)
-    sample = {
-        "network_devices": [
-            {"hostname": "C1-GSR12016", "interfaces": [{"name":"Loopback0","ip_address":"222.7.0.1"}], "bgp_neighbors": []}
-        ],
-        "network_connections": []
-    }
-    return json.dumps(sample, indent=2)
-
-
-def convert_new_config_to_old(new_config: dict) -> dict:
-    """
-    将新格式配置转换成旧格式，以便复用原生成逻辑
-    同时保证 BGP AS 之间的连接能被正确解析
-    """
-    network_devices = []
-    network_connections = []
-
-    for dev in new_config.get("devices", []):
-        hostname = dev["name"]
-        loopback = dev.get("loopback", "").split("/")[0]
-
-        interfaces = []
-        # 添加 Loopback0 接口（保证 core_ip 能取到）
-        if loopback:
-            interfaces.append({
-                "name": "Loopback0",
-                "ip_address": loopback,
-                "description": "Loopback"
-            })
-
-        # 物理接口
-        for iface in dev.get("interfaces", []):
-            interface_name = iface["interface"]
-            ip_address = iface["ip"].split("/")[0]
-            peer_device, peer_interface = iface["peer"].split(":")
-            interfaces.append({
-                "name": interface_name,
-                "ip_address": ip_address,
-                "description": f"TO-{peer_device}"
-            })
-
-            # 添加物理连接
-            network_connections.append({
-                "source_device": hostname,
-                "source_interface": interface_name,
-                "destination_device": peer_device,
-                "destination_interface": peer_interface
-            })
-
-        # BGP 邻居
-        bgp_neighbors = []
-        for neigh in dev.get("bgp", {}).get("neighbors", []):
-            bgp_neighbors.append({
-                "neighbor_ip": neigh["ip"].split("/")[0],  # 去掩码
-                "remote_as": neigh["as"]
-            })
-
-        network_devices.append({
-            "hostname": hostname,
-            "interfaces": interfaces,
             "bgp_neighbors": bgp_neighbors,
-            "as_number": dev.get("bgp", {}).get("as")  # 新增 AS 号字段
+            "interfaces": interfaces,
+            "original_data": device  # 保留原始数据用于节点标签
         })
 
     return {
-        "network_devices": network_devices,
-        "network_connections": network_connections
+        "processed_devices": processed_devices,
+        "network_connections": config["network_connections"],
+        "ip_to_hostname": ip_to_hostname
     }
 
+
+def create_device_node(device: dict, style_config: dict):
+    """创建设备节点（展示更多属性）"""
+    hostname = device.get("hostname", "未知设备")
+    core_ip = device.get("core_ip", "无Loopback")
+    as_number = device.get("as_number")
+    as_text = f"AS:{as_number}" if as_number is not None else ""
+
+    orig_device = device.get("original_data", {})
+    device_model = orig_device.get("model", "")
+    device_type = orig_device.get("device_type", "")
+    ospf_process = orig_device.get("routing_protocols", {}).get("ospf", {}).get("process_id", "")
+    ospf_text = f"OSPF:{ospf_process}" if ospf_process else ""
+
+    label_lines = [
+        hostname,
+        f"Loopback:{core_ip}",
+        as_text,
+        f"{device_type}/{device_model}".strip("/"),
+        ospf_text
+    ]
+    valid_label_lines = [line for line in label_lines if line.strip()]
+
+    if len(valid_label_lines) > 5:
+        valid_label_lines = valid_label_lines[:4] + ["..."]
+
+    final_label = "\n".join(valid_label_lines)
+
+    node_style = style_config["nodes"].get(
+        device["role"],
+        style_config["nodes"]["other"]
+    ).copy()
+
+    if device["role"] == "agg_switch":
+        try:
+            return Switch(final_label, **node_style)
+        except TypeError:
+            from diagrams.generic.blank import Blank
+            return Blank(final_label, **node_style)
+    else:
+        try:
+            return RouterNode(final_label, **node_style)
+        except TypeError:
+            from diagrams.generic.blank import Blank
+            return Blank(final_label, **node_style)
+
+
+def generate_topology_svg(parsed_config: dict, style_config: dict, output_name: str) -> str:
+    """生成拓扑SVG"""
+    processed_devices = parsed_config["processed_devices"]
+    network_connections = parsed_config["network_connections"]
+    ip_to_hostname = parsed_config["ip_to_hostname"]
+    graph_style = style_config["graph"].copy()
+
+    uid = uuid.uuid4().hex[:8]
+    safe_output_name = f"{output_name}_{uid}"
+    output_path = OUTPUT_DIR / safe_output_name
+
+    try:
+        diag = Diagram(
+            name="BTD 网络拓扑图",
+            filename=str(output_path),
+            show=False,
+            outformat="svg",
+            graph_attr=graph_style
+        )
+    except TypeError:
+        diag = Diagram(
+            name="BTD 网络拓扑图",
+            filename=str(output_path),
+            show=False,
+            graph_attr=graph_style
+        )
+
+    device_node_map = {}
+    with diag:
+        with Cluster("核心路由器区", graph_attr=style_config["clusters"]["core"]):
+            for dev in processed_devices:
+                if dev["cluster_type"] == "core":
+                    node = create_device_node(dev, style_config)
+                    device_node_map[dev["hostname"]] = node
+
+        with Cluster("边缘路由器区", graph_attr=style_config["clusters"]["edge"]):
+            for dev in processed_devices:
+                if dev["cluster_type"] == "edge":
+                    node = create_device_node(dev, style_config)
+                    device_node_map[dev["hostname"]] = node
+
+        with Cluster("汇聚交换机区", graph_attr=style_config["clusters"]["agg"]):
+            for dev in processed_devices:
+                if dev["cluster_type"] == "agg":
+                    node = create_device_node(dev, style_config)
+                    device_node_map[dev["hostname"]] = node
+
+        physical_edge_style = style_config["edges"]["physical"].copy()
+        drawn_physical_links = set()
+        for conn in network_connections:
+            src_dev = conn.get("source_device")
+            dst_dev = conn.get("destination_device")
+            src_if = conn.get("source_interface", "")
+            dst_if = conn.get("destination_interface", "")
+            if not (src_dev and dst_dev and src_dev in device_node_map and dst_dev in device_node_map):
+                continue
+
+            link_key = tuple(sorted([src_dev, dst_dev, src_if, dst_if]))
+            if link_key in drawn_physical_links:
+                continue
+            drawn_physical_links.add(link_key)
+
+            edge_label = f"{src_if}\n↓\n{dst_if}" if src_if and dst_if else ""
+            physical_edge_style["label"] = edge_label
+
+            device_node_map[src_dev] >> Edge(**physical_edge_style) >> device_node_map[dst_dev]
+
+        bgp_edge_style = style_config["edges"]["bgp"].copy()
+        drawn_bgp_links = set()
+        bgp_allowed_roles = {"core_router", "edge_router"}
+
+        for dev in processed_devices:
+            if dev["role"] not in bgp_allowed_roles or not dev.get("bgp_neighbors"):
+                continue
+
+            src_dev_name = dev["hostname"]
+            src_as = dev.get("as_number", "未知")
+
+            for neigh in dev["bgp_neighbors"]:
+                neigh_ip = neigh.get("neighbor_ip")
+                neigh_as = neigh.get("remote_as", "未知")
+                if not neigh_ip:
+                    continue
+
+                dst_dev_name = parsed_config["ip_to_hostname"].get(neigh_ip)
+                if not (dst_dev_name and dst_dev_name in device_node_map):
+                    continue
+
+                dst_dev = next((d for d in processed_devices if d["hostname"] == dst_dev_name), None)
+                if not dst_dev or dst_dev["role"] not in bgp_allowed_roles:
+                    continue
+
+                link_key = tuple(sorted([src_dev_name, dst_dev_name]))
+                if link_key in drawn_bgp_links:
+                    continue
+                drawn_bgp_links.add(link_key)
+
+                bgp_edge_style["label"] = f"BGP\nAS{src_as} ↔ AS{neigh_as}"
+
+                device_node_map[src_dev_name] >> Edge(**bgp_edge_style) >> device_node_map[dst_dev_name]
+
+    svg_file_path = output_path.with_suffix(".svg")
+    if not svg_file_path.exists():
+        raise RuntimeError("SVG生成失败，请检查 diagrams/graphviz 安装")
+
+    with open(svg_file_path, "r", encoding="utf-8") as f:
+        svg_content = f.read()
+    svg_content = svg_content.replace(
+        "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
+        "/icons/"
+    )
+    with open(svg_file_path, "w", encoding="utf-8") as f:
+        f.write(svg_content)
+
+    return f"/static/outputs/{svg_file_path.name}"
+
+# ================= API 接口 =================
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request):
+    """默认前端页面"""
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "default_style": json.dumps(DEFAULT_STYLE_CONFIG, indent=2),
+            "example_config": json.dumps({
+                "network_devices": [{"hostname": "C1-Test", "loopback_interface": {"name": "Loopback0", "ip_address": "10.0.0.1/32"}, "interfaces": [], "routing_protocols": {"bgp": {"asn": 65000, "neighbors": []}}}],
+                "network_connections": []
+            }, indent=2)
+        }
+    )
+
+
 @app.post("/generate", response_class=JSONResponse)
-async def generate(data: GenerateRequest = Body(...)):
+async def generate_topology(req: GenerateRequest = Body(...)):
+    """生成拓扑SVG接口"""
     try:
-        # 网络配置
-        config_text = json.dumps(data.config)
-        config = load_network_config_from_text(config_text)
-        # 样式配置（如果不传则用默认）
-        style_config = data.style or DEFAULT_STYLE_CONFIG.copy()
+        style_config = DEFAULT_STYLE_CONFIG.copy()
+        if req.style:
+            def merge_dict(target, source):
+                for k, v in source.items():
+                    if isinstance(v, dict) and k in target and isinstance(target[k], dict):
+                        merge_dict(target[k], v)
+                    else:
+                        target[k] = v
+            merge_dict(style_config, req.style)
 
-        # 生成 SVG
-        rel_svg = generate_diagram_from_config(config, style_config, data.output_name)
+        parsed_config = parse_network_config(req.config)
 
-        # 替换 SVG 中的图标路径
-        with open(STATIC_DIR / rel_svg, "r", encoding="utf-8") as f:
-            svg = f.read()
-        svg = svg.replace(
-            "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
-            "/icons/"
+        svg_url = generate_topology_svg(
+            parsed_config=parsed_config,
+            style_config=style_config,
+            output_name=req.output_name
         )
-        with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
-            f.write(svg)
 
-        return {"svg_url": f"/static/{rel_svg}"}
+        return {
+            "code": 200,
+            "message": "拓扑生成成功",
+            "data": {"svg_url": svg_url}
+        }
 
+    except HTTPException as e:
+        return {"code": e.status_code, "message": e.detail}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"code": 500, "message": f"生成失败：{str(e)}"}
 
-
-@app.post("/generate_v2", response_class=JSONResponse)
-async def generate_v2(data: GenerateRequestV2 = Body(...)):
-    try:
-        # 将新格式转成旧格式
-        old_config = convert_new_config_to_old(data.config)
-        config_text = json.dumps(old_config)
-        config = load_network_config_from_text(config_text)
-
-        style_config = data.style or DEFAULT_STYLE_CONFIG.copy()
-
-        rel_svg = generate_diagram_from_config(config, style_config, data.output_name)
-
-        # 替换 SVG 图标路径
-        with open(STATIC_DIR / rel_svg, "r", encoding="utf-8") as f:
-            svg = f.read()
-        svg = svg.replace(
-            "/home/www/config_parsed_gen/venv/lib/python3.10/site-packages/resources/",
-            "/icons/"
-        )
-        with open(STATIC_DIR / rel_svg, "w", encoding="utf-8") as f:
-            f.write(svg)
-
-        return {"svg_url": f"/static/{rel_svg}"}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# run via: uvicorn app.main:app --reload
+# ================= 运行入口 =================
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        app="__main__:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        workers=1
+    )
