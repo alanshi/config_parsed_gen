@@ -42,6 +42,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # 静态文件和模板
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
