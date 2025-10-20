@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>BTD 网络拓扑生成器</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/static/js/tailwindcss.js"></script>
     <!-- 自定义 Tailwind 配置 -->
     <script>
       tailwind.config = {
@@ -80,33 +80,121 @@
   "network_devices": [
     {
       "hostname": "C1-GSR12016",
+      "device_type": "core-router",
+      "vendor": "Cisco",
+      "model": "GSR12016",
+      "loopback_interface": {
+        "name": "Loopback0",
+        "ip_address": "192.168.1.1/32"
+      },
       "interfaces": [
-        {"name": "Loopback0", "ip_address": "222.7.0.1"},
-        {"name": "TenGigabitEthernet0/0", "description": "TO-S1-7609", "ip_address": "222.7.0.141", "mtu": 1508, "pim_sparse_mode": true}
+        {
+          "name": "TenGigabitEthernet0/0",
+          "description": "TO-S1-7609",
+          "ip_address": "10.10.1.1/24",
+          "mtu": 1500,
+          "pim_sparse_mode": true,
+          "admin_status": "up",
+          "oper_status": "up"
+        },
+        {
+          "name": "TenGigabitEthernet0/1",
+          "description": "TO-S2-3750",
+          "ip_address": "10.10.2.1/24",
+          "mtu": 9216,
+          "admin_status": "up",
+          "oper_status": "up"
+        }
       ],
-      "bgp_neighbors": [
-        {"neighbor_ip": "222.7.0.2", "remote_as": 2516},
-        {"neighbor_ip": "222.7.0.225", "remote_as": 4713}
-      ]
-    },
-    {
-      "hostname": "C2-GSR12016",
-      "interfaces": [
-        {"name": "Loopback0", "ip_address": "222.7.0.2"},
-        {"name": "GigabitEthernet2/0", "description": "TO-C1-GSR12016", "ip_address": "222.7.0.138"}
-      ],
-      "bgp_neighbors": [
-        {"neighbor_ip": "222.7.0.1", "remote_as": 2516},
-        {"neighbor_ip": "222.7.0.229", "remote_as": 4713}
-      ]
+      "routing_protocols": {
+        "bgp": {
+          "asn": 65001,
+          "neighbors": [
+            {
+              "neighbor_ip": "10.10.1.2",
+              "remote_as": 65002,
+              "description": "S1-7609"
+            },
+            {
+              "neighbor_ip": "10.10.2.2",
+              "remote_as": 65003,
+              "description": "S2-3750"
+            }
+          ]
+        },
+        "ospf": {
+          "process_id": "1",
+          "areas": [
+            {
+              "area_id": "0.0.0.0",
+              "networks": ["10.10.1.0/24", "10.10.2.0/24"]
+            },
+            {
+              "area_id": "1.1.1.1",
+              "networks": ["192.168.1.0/24"]
+            }
+          ]
+        }
+      }
     },
     {
       "hostname": "S1-7609",
+      "device_type": "switch",
+      "vendor": "Cisco",
+      "model": "7609",
+      "loopback_interface": {
+        "name": "Loopback0",
+        "ip_address": "192.168.2.1/32"
+      },
       "interfaces": [
-        {"name": "Loopback0", "ip_address": "222.7.0.3"},
-        {"name": "TenGigabitEthernet3/1", "description": "TO-C1-GSR12016", "ip_address": "222.7.0.142", "mtu": 1508, "pim_sparse_mode": true}
+        {
+          "name": "TenGigabitEthernet3/1",
+          "description": "FROM-C1-GSR12016",
+          "ip_address": "10.10.1.2/24",
+          "mtu": 1500,
+          "admin_status": "up",
+          "oper_status": "up"
+        },
+        {
+          "name": "TenGigabitEthernet3/2",
+          "description": "TO-SW1-2960",
+          "ip_address": "10.10.3.1/24",
+          "mtu": 1500,
+          "admin_status": "up",
+          "oper_status": "up"
+        }
       ],
-      "bgp_neighbors": []
+      "routing_protocols": {
+        "ospf": {
+          "process_id": "1",
+          "areas": [
+            {
+              "area_id": "1.1.1.1",
+              "networks": ["10.10.1.0/24", "10.10.3.0/24"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "hostname": "SW1-2960",
+      "device_type": "switch",
+      "vendor": "Cisco",
+      "model": "2960",
+      "loopback_interface": {
+        "name": "Loopback0",
+        "ip_address": "192.168.3.1/32"
+      },
+      "interfaces": [
+        {
+          "name": "GigabitEthernet0/1",
+          "description": "FROM-S1-7609",
+          "ip_address": "10.10.3.2/24",
+          "mtu": 1500,
+          "admin_status": "up",
+          "oper_status": "up"
+        }
+      ]
     }
   ],
   "network_connections": [
@@ -114,16 +202,23 @@
       "source_device": "C1-GSR12016",
       "source_interface": "TenGigabitEthernet0/0",
       "destination_device": "S1-7609",
-      "destination_interface": "TenGigabitEthernet3/1"
+      "destination_interface": "TenGigabitEthernet3/1",
+      "link_type": "fiber",
+      "status": "active",
+      "bandwidth": 10000
     },
     {
-      "source_device": "C1-GSR12016",
-      "source_interface": "TenGigabitEthernet2/0",
-      "destination_device": "C2-GSR12016",
-      "destination_interface": "GigabitEthernet2/0"
+      "source_device": "S1-7609",
+      "source_interface": "TenGigabitEthernet3/2",
+      "destination_device": "SW1-2960",
+      "destination_interface": "GigabitEthernet0/1",
+      "link_type": "ethernet",
+      "status": "active",
+      "bandwidth": 1000
     }
   ]
 }
+
             </textarea>
           </div>
         </div>
